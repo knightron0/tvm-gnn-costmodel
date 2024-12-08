@@ -161,17 +161,9 @@ class GraphModel(PythonBasedModel):
     def _fit_a_model(self, train_set, valid_set=None, valid_train_set=None):
         print("Fit a GNN. Train size: %d" % len(train_set))
 
-        def build_graph(pair):
-            (src_cur, dst_cur, edge_fea), node_fea, normalized_throughput = pair
-            g = dgl.graph((th.tensor(src_cur).cuda(), th.tensor(dst_cur).cuda()))
-            g.edata['fea'] = th.tensor(edge_fea).float().cuda()
-            g.ndata['fea'] = node_fea.cuda()
-
-            return g, normalized_throughput
-
         pairs = list(train_set.features.values())
 
-        # extract feature
+        # modify this based on structure of train_set
         idx = np.random.permutation(len(pairs))
         train_pairs = list(chain(*[[build_graph(x) for x in pairs[i]] for i in idx]))
         print("Sample Graph: ", train_pairs[0])
@@ -180,7 +172,9 @@ class GraphModel(PythonBasedModel):
         self.GNN = GNN(self.params['node_fea'], self.params['edge_fea'], self.params['hidden_dim']).float().cuda()
         opt = torch.optim.SGD(self.GNN.parameters(), lr=self.params['lr'])
         scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.99)
+        
         n = len(train_batched_graphs)
+
         self.loss_func = torch.nn.MSELoss()
 
         print('Learning rate: {} batch size: {}'.format(self.params['lr'], self.params['batch_size']))
@@ -221,6 +215,7 @@ class GraphModel(PythonBasedModel):
 
         return self.GNN
 
+    # what is dataset 
     def predict(self, dataset):
         if self.few_shot_learning in ["base_only", "fine_tune_mix_task", "fine_tune_per_task", "MAML"]:
             return self._predict_a_dataset(self.base_model, dataset)
@@ -248,7 +243,7 @@ class GraphModel(PythonBasedModel):
             ret[task] = self._predict_a_task(model, task, features)
         return ret
 
-    def build_graph(pair):
+    def build_graph(pair):  # (src_nodes, dest_nodes, node_fea)
         #print(len(pair))
         #print(len(pair[0]))
         if len(pair) == 3: (src_cur, dst_cur, edge_fea), node_fea, _ = pair
