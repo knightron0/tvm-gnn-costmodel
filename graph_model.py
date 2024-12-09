@@ -5,8 +5,8 @@ import numpy as np
 import time
 import logging
 
-from ..graph_feature import get_graph_from_measure_pairs, get_graph_from_states, get_graph_from_file
-from .cost_model import PythonBasedModel
+# from ..graph_feature import get_graph_from_measure_pairs, get_graph_from_states, get_graph_from_file
+# from .cost_model import PythonBasedModel
 
 import dgl
 import collections
@@ -19,6 +19,7 @@ import copy
 import matplotlib.pyplot as plt
 import torch as th
 from itertools import chain
+import json
 
 logger = logging.getLogger('auto_scheduler')
 
@@ -78,19 +79,107 @@ class LambdaRankLoss(torch.nn.Module):
         loss = -torch.sum(masked_losses)
         return loss
 
+class PythonBasedModel():
+    """Base class for cost models implemented in python"""
+
+    def __init__(self):
+        def update_func(inputs, results):
+            self.update(inputs, results)
+
+        def predict_func(task, states, return_ptr):
+            return_ptr = ctypes.cast(return_ptr, ctypes.POINTER(ctypes.c_float))
+            array_wrapper = np.ctypeslib.as_array(return_ptr, shape=(len(states),))
+            array_wrapper[:] = self.predict(task, states)
+
+        def predict_stage_func(task, states, return_ptr):
+            ret = self.predict_stages(task, states)
+            return_ptr = ctypes.cast(return_ptr, ctypes.POINTER(ctypes.c_float))
+            array_wrapper = np.ctypeslib.as_array(return_ptr, shape=ret.shape)
+            array_wrapper[:] = ret
+
+        self.__init_handle_by_constructor__(
+            _ffi_api.PythonBasedModel, update_func, predict_func, predict_stage_func
+        )
+
+    def update(self, inputs, results):
+        """Update the cost model according to new measurement results (training data).
+
+        Parameters
+        ----------
+        inputs : List[auto_scheduler.measure.MeasureInput]
+            The measurement inputs
+        results : List[auto_scheduler.measure.MeasureResult]
+            The measurement results
+        """
+        raise NotImplementedError
+
+    def predict(self, task, states):
+        """Predict the scores of states
+
+        Parameters
+        ----------
+        search_task : SearchTask
+            The search task of states
+        states : List[State]
+            The input states
+
+        Returns
+        -------
+        scores: List[float]
+            The predicted scores for all states
+        """
+        raise NotImplementedError
+
+    def predict_stages(self, task, states):
+        """Predict the scores of all stages in states. This is the breakdown version of `predict`.
+
+        Parameters
+        ----------
+        search_task : SearchTask
+            The search task of states
+        states : List[State]
+            The input states
+
+        Returns
+        -------
+        scores: List[float]
+            The predicted scores for all stages in all states in the packed format
+
+        Note
+        ----
+        For faster data copy between c++ and python, the python part returns scores in a
+        single flatten array using a packed format. The c++ part then unpacks the flatten array.
+
+        The packed format is:
+        {
+          float  scores[N];                 // scores[i] is the score for states[i].
+          int    n_stage_0;                 // the number of stages in states[0]
+          float  stage_scores_0[[n_stage_0] // the scores for all stages in states[0]
+          int    n_stage_1;                 // the number of stages in states[1]
+          float  stage_scores_1[n_stage_1]; // the scores for all stages in states[1]
+          ...
+          int    n_stage_i;                 // the number of stages in states[i]
+          float  stage_scores_1[n_stage_i]; // the scores for all stages in states[i]
+          ...  // until i == N - 1
+        }
+        To implement this format, we also store int as float, so we can store all numbers
+        into a single float array.
+        """
+        raise NotImplementedError
+
 class GNN(torch.nn.Module):
-    def __init__(self, node_dim, edge_dim, hidden_dim):
+    def __init__(self, node_dim, hidden_dim):
         super(GNN, self).__init__()
-        self.msg = torch.nn.Linear(node_dim + edge_dim, hidden_dim)
-        self.conv1 = dglnn.TAGConv(hidden_dim + node_dim, hidden_dim)
+        # self.msg = torch.nn.Linear(node_dim + edge_dim, hidden_dim)
+        self.conv1 = dglnn.TAGConv(node_dim, hidden_dim)
         self.conv2 = dglnn.TAGConv(hidden_dim, hidden_dim)
         self.conv3 = dglnn.TAGConv(hidden_dim, hidden_dim)
         self.conv4 = dglnn.TAGConv(hidden_dim, hidden_dim)
         self.conv5 = dglnn.TAGConv(hidden_dim, hidden_dim)
         self.predict = torch.nn.Linear(hidden_dim, 1)
 
-    def message_func(self, edges):
-        return {'mid': F.relu(self.msg(torch.cat([edges.src['fea'], edges.data['fea']], 1)))}
+    # def message_func(self, edges):
+    #     return {'mid': F.relu(self.msg(torch.cat([edges.src['fea'], edges.data['fea']], 1)))}
 
     def forward(self, g):
         with g.local_scope():
@@ -169,7 +258,7 @@ class GraphModel(PythonBasedModel):
         print("Sample Graph: ", train_pairs[0])
         train_batched_graphs, train_batched_labels = create_batch(train_pairs, self.params['batch_size'])
 
-        self.GNN = GNN(self.params['node_fea'], self.params['edge_fea'], self.params['hidden_dim']).float().cuda()
+        self.GNN = GNN(self.params['node_fea'], self.params['hidden_dim']).float().cuda()
         opt = torch.optim.SGD(self.GNN.parameters(), lr=self.params['lr'])
         scheduler = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.99)
         
@@ -267,7 +356,7 @@ class GraphModel(PythonBasedModel):
 
     def load(self, file_name: str):
         print("loading from: "+file_name)
-        self.GNN = GNN(self.params['node_fea'], self.params['edge_fea'], self.params['hidden_dim']).float()
+        self.GNN = GNN(self.params['node_fea'], self.params['hidden_dim']).float()
         self.GNN.load_state_dict(torch.load(file_name))
 
 
@@ -291,3 +380,53 @@ def create_batch(graph_pairs, batch_size):
             batched_graphs.append(g)
             batched_labels.append(l)
     return batched_graphs, batched_labels
+
+
+def load_dataset(file_path):
+    """
+    Loads graphs from a JSON file, converts them to DGL format, and extracts node data.
+
+    Args:
+        file_path (str): Path to the JSON file.
+
+    Returns:
+        tuple: (DGLGraph, node_data_dict), where:
+            - DGLGraph is the constructed DGL graph.
+            - node_data_dict is a dictionary mapping node IDs to their "data".
+    """
+    with open(file_path, 'r') as f:
+        graphs = json.load(f, object_hook=list)  # Load the list of graphs from the JSON file
+
+    for g_i in graphs[:1]:
+        # Initialize the graph
+        num_nodes = len(g_i)
+        g = dgl.graph(([], []), num_nodes=num_nodes)  # Empty graph with num_nodes nodes
+
+        # Prepare node data storage
+        node_data_dict = {}
+
+        # Add edges and extract node features
+        for node_id, node_info in g_i.items():
+            node_id = int(node_id)  # Convert node_id from string to integer
+            
+            # Extract neighbors and add edges
+            neighbors = node_info.get("neighbours", [])
+            for neighbor in neighbors:
+                g.add_edges(node_id, neighbor)
+            
+            # Extract and store node "data"
+            node_data_dict[node_id] = node_info.get("data", [])
+        
+        # Convert node data to tensor and store in the graph
+        node_features = [torch.tensor(node_data_dict[node_id], dtype=torch.float32) for node_id in range(num_nodes)]
+        g.ndata['data'] = torch.stack(node_features)
+
+        # Yield the DGL graph and node data dictionary
+        yield g
+
+
+file = './testtuning_60.json.graph.json'
+gen = load_dataset(file)
+
+for g in gen:
+    print("Graph:", g)
