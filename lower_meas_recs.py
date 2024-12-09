@@ -248,8 +248,15 @@ def main(args):
             }
             all_data.append(rec_data)
             i += 1
-        with open(f"/scratch/gilbreth/mangla/gnn_dataset/{args.filename}.graph.json", "w") as f:
-            json.dump(all_data, f)
+            
+            if i % 500 == 0:
+                with open(f"/scratch/gilbreth/mangla/gnn_dataset/{args.filename}.graph.json", "a") as f:
+                    json.dump(all_data, f)
+                all_data = []
+                
+        if all_data:
+            with open(f"/scratch/gilbreth/mangla/gnn_dataset/{args.filename}.graph.json", "a") as f:
+                json.dump(all_data, f)
     except Exception as e:
         print(f"Could not process file {args.filename}, error: {e}")
 
@@ -257,6 +264,10 @@ def main(args):
 import os
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pattern", type=str, help="Pattern to match JSON files")
+    args_pattern = parser.parse_args()
 
     directory_path = "/scratch/gilbreth/mangla/tlm_dataset/gen/gen_data/measure_data_v100"
 
@@ -266,7 +277,12 @@ if __name__ == "__main__":
     tasks = load_and_register_tasks()
 
     for filename in os.listdir(directory_path):
-        if filename.endswith(".json"):  # Ensure we only process JSON files
+        if filename.endswith(".json") and args_pattern.pattern in filename:  # Match pattern in JSON files
+            # Check if file already exists in gnn_dataset
+            output_path = f"/scratch/gilbreth/mangla/gnn_dataset/{filename}.graph.json"
+            if os.path.exists(output_path):
+                print(f"Skipping {filename} - already processed")
+                continue
             measured_path = os.path.join(directory_path, filename)
             args = argparse.Namespace(measured_path=measured_path, filename=filename)
             main(args)
