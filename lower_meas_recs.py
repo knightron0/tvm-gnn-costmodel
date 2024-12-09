@@ -1,4 +1,5 @@
 import argparse
+from gensim.models import fasttext
 from tvm import auto_scheduler
 from tvm.auto_scheduler.measure import MeasureInput, MeasureResult
 from tvm.auto_scheduler.search_task import SearchTask
@@ -10,6 +11,7 @@ import tvm.target
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm  # Add tqdm import
+import json
 
 
 NETWORK_INFO_FOLDER = None
@@ -17,6 +19,25 @@ TO_MEASURE_PROGRAM_FOLDER = None
 MEASURE_RECORD_FOLDER = None
 HARDWARE_PLATFORM = None
 
+model = fasttext.FastText.load("/scratch/gilbreth/mangla/ast-models/fasttext_embed.model")
+
+class Graph:
+    def __init__(self):
+        self.nodes = {}
+        self.root = None
+
+    def add_node(self, id, data, par=-1, root=False, neighbors=[]):
+        self.nodes[id] = {
+            'data': data,
+            'root': root,
+            'neighbors': neighbors.copy(),
+            'parent': par
+        }
+        if root:
+            self.root = id
+
+    def get_node(self, id):
+        return self.nodes[id]
 
 def clean_name(x):
     x = str(x)
@@ -36,9 +57,9 @@ def register_data_path(target_str):
 
     print(f"register data path: {model}")
     global NETWORK_INFO_FOLDER, TO_MEASURE_PROGRAM_FOLDER, MEASURE_RECORD_FOLDER, HARDWARE_PLATFORM
-    NETWORK_INFO_FOLDER = f"dataset/network_info/{model}"
-    TO_MEASURE_PROGRAM_FOLDER = f"dataset/to_measure_programs/{model}"
-    MEASURE_RECORD_FOLDER = f"dataset/measure_records/{model}"
+    NETWORK_INFO_FOLDER = f"/scratch/gilbreth/mangla/tlm_dataset/gen/dataset/network_info/{model}"
+    TO_MEASURE_PROGRAM_FOLDER = f"/scratch/gilbreth/mangla/tlm_dataset/gen/dataset/to_measure_programs/{model}"
+    MEASURE_RECORD_FOLDER = f"/scratch/gilbreth/mangla/tlm_dataset/gen/dataset/measure_records/{model}"
     HARDWARE_PLATFORM = model
 
 
@@ -137,10 +158,60 @@ def get_bert_files(target):
     files.sort()
     return files
 
+def build_embedding(node):
+    node_type = str(type(node)).split(".")[-1].replace("'>", "")
+    if node_type == "IntImm" or node_type == "FloatImm":
+        return model.wv[node_type].tolist() + [1, node.value]
+    else:
+        return model.wv[node_type].tolist() + [0, 0]
+
+def build_graph(task, state):
+    graph = Graph()
+    parent_stack = []
+
+    def preorder(node):
+        current_node_id = len(graph.nodes)
+        
+        graph.add_node(current_node_id, build_embedding(node), par=parent_stack[-1] if parent_stack else -1, root=(current_node_id == 0))
+
+        if parent_stack:
+            parent = parent_stack[-1]
+            graph.nodes[parent]['neighbors'].append(current_node_id)
+            graph.nodes[current_node_id]['neighbors'].append(parent)
+        
+        parent_stack.append(current_node_id)
+
+        return None
+
+    def postorder(node):
+        if parent_stack:
+            parent_stack.pop()
+        return None
+
+    @tvm.tir.transform.prim_func_pass(opt_level=1)
+    def ast_extractor(f, mod, ctx):
+        tvm.tir.stmt_functor.ir_transform(f.body, preorder, postorder)
+        return f
+
+    schedule, args = task.compute_dag.apply_steps_from_state(state)
+
+    with tvm.transform.PassContext(opt_level=1):
+        try:
+            mod = tvm.lower(schedule, args)
+            tvm.tir.stmt_functor.ir_transform(mod["main"].body, preorder, postorder)
+        except Exception as e:
+            print(f"Could not lower for {task.workload_key}, error: {e}")
+            return graph
+
+    return graph
 
 def main(args):
     print(args.measured_path)
-    inputs, res = auto_scheduler.RecordReader(args.measured_path).read_lines()
+    try:
+        inputs, res = auto_scheduler.RecordReader(args.measured_path).read_lines()
+    except Exception as e:
+        print(f"Could not read file {args.measured_path}, error: {e}")
+        exit()
 
     def process_input(input):
         input = auto_scheduler.measure.recover_measure_input(input, True)
@@ -159,28 +230,35 @@ def main(args):
             hardware_params=task.hardware_params,
             layout_rewrite_option=task.layout_rewrite_option,
         )
-
-        sched, args = task.compute_dag.apply_steps_from_state(state)
-        mod = tvm.lower(sched, args)
-
-    # with ThreadPoolExecutor() as executor:
-    #     # Wrap the inputs with tqdm for progress tracking
-    #     for _ in tqdm(executor.map(process_input, inputs), total=len(inputs)):
-    #         pass  # Just to consume the iterator
-    for input in tqdm(inputs, total=len(inputs)):
-        process_input(input)
-
-    result: MeasureResult = res[0]
-    print(len(inputs))
-    print(len(res))
-    # print(result)
+        try:
+            g = build_graph(task, state)
+            return g.nodes
+        except Exception as e:
+            print(f"Could not build graph for {args.filename}\n, error: {e}")
+            return {}
+    try:
+        all_data = []
+        i = 0
+        for input in tqdm(inputs, total=len(inputs)):
+            nodes = process_input(input)
+            costs = sum([float(x) for x in res[i].costs]) / len(res[i].costs)
+            rec_data = {
+                "graph": nodes,
+                "cost": costs
+            }
+            all_data.append(rec_data)
+            i += 1
+        with open(f"/scratch/gilbreth/mangla/gnn_dataset/{args.filename}.graph.json", "w") as f:
+            json.dump(all_data, f)
+    except Exception as e:
+        print(f"Could not process file {args.filename}, error: {e}")
 
 
 import os
 
 if __name__ == "__main__":
 
-    directory_path = "/scratch/gilbreth/dchawra/tlm/gen/gen_data/measure_data_v100/"
+    directory_path = "/scratch/gilbreth/mangla/tlm_dataset/gen/gen_data/measure_data_v100"
 
     # Load task registry
     register_data_path("nvidia/nvidia-v100")
@@ -190,5 +268,5 @@ if __name__ == "__main__":
     for filename in os.listdir(directory_path):
         if filename.endswith(".json"):  # Ensure we only process JSON files
             measured_path = os.path.join(directory_path, filename)
-            args = argparse.Namespace(measured_path=measured_path)
+            args = argparse.Namespace(measured_path=measured_path, filename=filename)
             main(args)

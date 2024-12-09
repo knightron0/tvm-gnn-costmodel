@@ -1,0 +1,4 @@
+register data path: v100
+Load all tasks...
+/scratch/gilbreth/mangla/tlm_dataset/gen/gen_data/measure_data_v100/testtuning_55.json
+Res[i] MeasureResult(cost:[7.42e-05], error_no:0, all_cost:14.2363, Tstamp:1.69526e+09)

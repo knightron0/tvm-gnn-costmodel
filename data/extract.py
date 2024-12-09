@@ -178,17 +178,17 @@ def get_available_networks():
     """Returns a list of available networks and their configurations"""
     return [
         ("resnet-18", "NHWC"),
-        ("resnet-34", "NHWC"), 
-        ("resnet-50", "NHWC"),
-        ("mobilenet", "NHWC"),
-        ("inception_v3", "NHWC"),
-        ("squeezenet_v1.1", "NCHW"),
-        ("densenet-121", "NHWC"),
-        ("vgg-16", "NHWC"),
-        ("vgg-19", "NHWC"),
-        ("mlp", "NHWC"),
-        ("lstm", "NHWC"),
-        ("dcgan", "NHWC"),
+        # ("resnet-34", "NHWC"), 
+        # ("resnet-50", "NHWC"),
+        # ("mobilenet", "NHWC"),
+        # ("inception_v3", "NHWC"),
+        # ("squeezenet_v1.1", "NCHW"),
+        # ("densenet-121", "NHWC"),
+        # ("vgg-16", "NHWC"),
+        # ("vgg-19", "NHWC"),
+        # ("mlp", "NHWC"),
+        # ("lstm", "NHWC"),
+        # ("dcgan", "NHWC"),
     ]
 
 def process_all_networks(target_str="llvm -mcpu=core-avx2", batch_size=1, dtype="float32"):
@@ -200,9 +200,12 @@ def process_all_networks(target_str="llvm -mcpu=core-avx2", batch_size=1, dtype=
     
     for network_name, layout in networks:
         print(f"\n=== Processing {network_name} ===")
-        mod, params, input_shape, output_shape = get_network(
-            network_name, batch_size, layout, dtype
-        )
+        data = relay.var("data", shape=(batch_size, 1024), dtype=dtype)
+        weight = relay.var("weight", shape=(1024, 1024), dtype=dtype)
+        mod = tvm.IRModule.from_expr(relay.Function([data, weight], relay.nn.matmul(data, weight)))
+        params = {}
+        input_shape = (batch_size, 1024)
+        output_shape = (batch_size, 1024)
         
         # Extract tasks
         tasks, task_weights = auto_scheduler.extract_tasks(mod["main"], params, target)
@@ -213,26 +216,80 @@ def process_all_networks(target_str="llvm -mcpu=core-avx2", batch_size=1, dtype=
             graph_out = build_graph(task, task.compute_dag.get_init_state())
             
             # Write traces to file
-            dt = " ".join([type(x['data']).__name__ for x in graph_out.dfs_trace(graph_out.root)])
-            bt = " ".join([type(x['data']).__name__ for x in graph_out.bfs_trace(graph_out.root)])
-            with open("traces.txt", "a") as f:
-                f.write(dt + "\n" + bt + "\n")
+            # dt = " ".join([type(x['data']).__name__ for x in graph_out.dfs_trace(graph_out.root)])
+            # bt = " ".join([type(x['data']).__name__ for x in graph_out.bfs_trace(graph_out.root)])
+            # with open("traces.txt", "a") as f:
+            #     f.write(dt + "\n" + bt + "\n")
             
-            for node_id in graph_out.nodes:
-                for _ in range(3):
-                    with open("traces.txt", "a") as f:
-                        f.write(" ".join([type(x['data']).__name__ for x in graph_out.uniform_random_walk(node_id, 50)]) + "\n")
-                node = graph_out.nodes[node_id]
-                if len(node['neighbors']) > 1:
-                    neighbor_types = [type(node['data']).__name__] + [type(graph_out.nodes[n]['data']).__name__ for n in node['neighbors'] if n != node['parent']]
-                    with open("traces.txt", "a") as f:
-                        f.write(" ".join(neighbor_types) + "\n")
+            # for node_id in graph_out.nodes:
+            #     for _ in range(3):
+            #         with open("traces.txt", "a") as f:
+            #             f.write(" ".join([type(x['data']).__name__ for x in graph_out.uniform_random_walk(node_id, 50)]) + "\n")
+            #     node = graph_out.nodes[node_id]
+            #     if len(node['neighbors']) > 1:
+            #         neighbor_types = [type(node['data']).__name__] + [type(graph_out.nodes[n]['data']).__name__ for n in node['neighbors'] if n != node['parent']]
+            #         with open("traces.txt", "a") as f:
+            #             f.write(" ".join(neighbor_types) + "\n")
             
             network_graphs.append({
                 'task_id': idx,
                 'workload_key': task.workload_key,
                 'graph': graph_out
             })
+            # Visualize the graph structure
+            import networkx as nx
+            import matplotlib.pyplot as plt
+            
+            # Create NetworkX directed graph for tree structure
+            G = nx.DiGraph()
+            
+            # Add nodes and edges starting from root
+            def add_nodes_from_root(node_id):
+                node_data = graph_out.nodes[node_id]
+                G.add_node(node_id, data=type(node_data['data']).__name__)
+                for neighbor in node_data['neighbors']:
+                    if neighbor != node_data['parent']:  # Only process children
+                        G.add_edge(node_id, neighbor)
+                        add_nodes_from_root(neighbor)
+                        
+            add_nodes_from_root(graph_out.root)
+            
+            # Set up the plot
+            plt.figure(figsize=(20,15))
+            
+            # Use hierarchical layout to show tree structure
+            pos = nx.spring_layout(G, k=2, iterations=50)
+            
+            # Draw nodes
+            nx.draw_networkx_nodes(G, pos,
+                                 node_color='lightblue',
+                                 node_size=2000,
+                                 alpha=0.7)
+            
+            # Draw edges with arrows to show hierarchy
+            nx.draw_networkx_edges(G, pos,
+                                 edge_color='gray', 
+                                 width=2,
+                                 alpha=0.5,
+                                 arrows=True,
+                                 arrowsize=20)
+            
+            # Add labels with node type information
+            labels = nx.get_node_attributes(G, 'data')
+            nx.draw_networkx_labels(G, pos, labels,
+                                  font_size=8,
+                                  font_weight='bold')
+            
+            plt.title(f"Tree Structure for Task {idx}\nWorkload: {task.workload_key}",
+                     pad=20, fontsize=12)
+            plt.axis('off')
+            
+            # Save the plot
+            plt.savefig(f'task_{idx}_tree.png',
+                       bbox_inches='tight', 
+                       dpi=300)
+            plt.close()
+            break
         all_graphs[network_name] = network_graphs
     
     return all_graphs
