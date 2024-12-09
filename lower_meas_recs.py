@@ -19,7 +19,27 @@ TO_MEASURE_PROGRAM_FOLDER = None
 MEASURE_RECORD_FOLDER = None
 HARDWARE_PLATFORM = None
 
-model = fasttext.FastText.load("/scratch/gilbreth/mangla/ast-models/fasttext_embed.model")
+def get_name(node):
+    try:
+        if isinstance(node, tvm.tir.Var):
+            return node.name
+        elif isinstance(node, tvm.tir.Buffer):
+            return node.name
+        elif hasattr(node, "var") and isinstance(node.var, tvm.tir.Var):
+            return node.var.name
+        elif isinstance(node, tvm.tir.BufferLoad):
+            return node.buffer.name
+        elif isinstance(node, tvm.tir.BufferStore):
+            return node.buffer.name
+        elif isinstance(node, tvm.tir.ProducerStore):
+            return node.producer.name
+        elif isinstance(node, tvm.tir.ProducerLoad):
+            return node.producer.name
+    except:
+        return None
+    return None
+
+# model = fasttext.FastText.load("/scratch/gilbreth/mangla/ast-models/fasttext_embed.model")
 
 class Graph:
     def __init__(self):
@@ -29,7 +49,6 @@ class Graph:
     def add_node(self, id, data, par=-1, root=False, neighbors=[]):
         self.nodes[id] = {
             'data': data,
-            'root': root,
             'neighbors': neighbors.copy(),
             'parent': par
         }
@@ -160,10 +179,18 @@ def get_bert_files(target):
 
 def build_embedding(node):
     node_type = str(type(node)).split(".")[-1].replace("'>", "")
+    node_name = get_name(node)
+    embed = [node_type] 
     if node_type == "IntImm" or node_type == "FloatImm":
-        return model.wv[node_type].tolist() + [1, node.value]
+        embed = embed + [1, node.value]
     else:
-        return model.wv[node_type].tolist() + [0, 0]
+        embed = embed + [0, 0]
+    if node_name:
+        embed = embed + [1, node_name]
+    else:
+        embed = embed + [0, 0]
+    return embed
+
 
 def build_graph(task, state):
     graph = Graph()
@@ -172,7 +199,7 @@ def build_graph(task, state):
     def preorder(node):
         current_node_id = len(graph.nodes)
         
-        graph.add_node(current_node_id, build_embedding(node), par=parent_stack[-1] if parent_stack else -1, root=(current_node_id == 0))
+        graph.add_node(current_node_id, build_embedding(node), par=parent_stack[-1] if parent_stack else -1)
 
         if parent_stack:
             parent = parent_stack[-1]
@@ -249,7 +276,7 @@ def main(args):
             all_data.append(rec_data)
             i += 1
             
-            if i % 500 == 0:
+            if i % 100 == 0:
                 with open(f"/scratch/gilbreth/mangla/gnn_dataset/{args.filename}.graph.json", "a") as f:
                     json.dump(all_data, f)
                 all_data = []
