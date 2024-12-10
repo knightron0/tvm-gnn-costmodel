@@ -395,38 +395,68 @@ def load_dataset(file_path):
             - node_data_dict is a dictionary mapping node IDs to their "data".
     """
     with open(file_path, 'r') as f:
-        graphs = json.load(f, object_hook=list)  # Load the list of graphs from the JSON file
+        data = f.read().split('][')
+        graphs = []
+        for i in range(len(data)):
+            info = '' if i == 0 else '['
+            info += data[i]
+            info += ']' if i != len(data) - 1 else ''
+            # print(len(info), info[c - diff: c])
+            # print('\n' * 5)
+            # print(info[c:c + diff])
+            try:
+                g = json.loads(info)  # Load the list of graphs from the JSON file
+            except:
+                D = 50000
+                print("Error occured while processing " + str(i) + "th index of data")
+                print("First 50k chars:")
+                print(info[:D])
 
-    for g_i in graphs[:1]:
+            graphs.extend(g)
+
+    print("Number of graphs:", len(graphs))
+
+    for g_i in graphs:
         # Initialize the graph
-        num_nodes = len(g_i)
-        g = dgl.graph(([], []), num_nodes=num_nodes)  # Empty graph with num_nodes nodes
+        # print(g_i)
+        # continue
 
         # Prepare node data storage
         node_data_dict = {}
 
+        g_info = g_i['graph']
+        cost = g_i['cost']
+        num_nodes = len(g_info)
+        
+        g = dgl.graph(([], []), num_nodes=num_nodes)  # Empty graph with num_nodes nodes
+
         # Add edges and extract node features
-        for node_id, node_info in g_i.items():
+        for node_id, node_info in g_info.items():
             node_id = int(node_id)  # Convert node_id from string to integer
             
+            # print(node_info)
             # Extract neighbors and add edges
-            neighbors = node_info.get("neighbours", [])
+            neighbors = node_info.get("neighbors", [])
             for neighbor in neighbors:
+                # print(node_id, neighbor)
                 g.add_edges(node_id, neighbor)
             
             # Extract and store node "data"
             node_data_dict[node_id] = node_info.get("data", [])
         
+        # g = dgl.graph((srcs, dests), num_nodes=num_nodes)
         # Convert node data to tensor and store in the graph
-        node_features = [torch.tensor(node_data_dict[node_id], dtype=torch.float32) for node_id in range(num_nodes)]
-        g.ndata['data'] = torch.stack(node_features)
+        # node_features = [torch.tensor(node_data_dict[node_id], dtype=torch.float32) for node_id in range(num_nodes)]
+        # g.ndata['data'] = torch.stack(node_features)
 
         # Yield the DGL graph and node data dictionary
-        yield g
+        yield (g, node_data_dict, cost)
 
 
-file = './testtuning_60.json.graph.json'
+file = 'testtuning_55.json.graph.json' # './testtuning_60.json.graph.json'
 gen = load_dataset(file)
 
-for g in gen:
+for (g, emb, cost) in gen:
     print("Graph:", g)
+
+    # print(emb)
