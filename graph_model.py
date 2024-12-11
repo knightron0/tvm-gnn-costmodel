@@ -453,7 +453,7 @@ def load_dataset(file_path):
         yield (g, node_data_dict, cost)
 
 
-file = 'testtuning_55.json.graph.json' # './testtuning_60.json.graph.json'
+file = '/scratch/gilbreth/mangla/gnn_dataset/testtuning_55.json.graph.json' # './testtuning_60.json.graph.json'
 gen = load_dataset(file)
 
 for (g, emb, cost) in gen:
