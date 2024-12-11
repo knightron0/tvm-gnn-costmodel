@@ -49,9 +49,8 @@ print("len tvm", len(tvm_dataset))
 n = len(tvm_dataset) // 10
 test_dataset = tvm_dataset[:n]
 train_dataset = tvm_dataset[n:]
-test_loader = DataLoader(test_dataset, batch_size=128)
-train_loader = DataLoader(train_dataset, batch_size=128)
-
+test_loader = DataLoader(test_dataset, batch_size=192)
+train_loader = DataLoader(train_dataset, batch_size=192)
 class Net(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -89,8 +88,15 @@ class Net(torch.nn.Module):
         return x
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = Net().to(device)
+if torch.cuda.device_count() > 1:
+    print(f"Using {torch.cuda.device_count()} GPUs!")
+    model = torch.nn.DataParallel(Net())
+    device = torch.device('cuda')
+else:
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = Net()
+
+model = model.to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
 
 def train(epoch):
@@ -149,12 +155,20 @@ def test(loader):
     }
 
 
+save_dir = "/scratch/gilbreth/mangla/gnn_models/model_checkpoints"
+os.makedirs(save_dir, exist_ok=True)
+
 test_acc = test(test_loader)
 print("Original Test Acc", test_acc)
 for epoch in range(1, 201):
     loss = train(epoch)
-    # train_acc = test(train_loader)
     test_acc = test(test_loader)
-    # print(f'Epoch: {epoch:03d}, Loss: {loss:.5f}, Train Acc: {train_acc:.5f}, 'f'Test Acc: {test_acc:.5f}')
     print(f'Epoch: {epoch:03d}, Loss: {loss:.5f}')
     print(f'Test Acc: {test_acc}')
+    
+    checkpoint_path = os.path.join(save_dir, f'model_epoch_{epoch}.pt')
+    if isinstance(model, torch.nn.DataParallel):
+        torch.save(model.module.state_dict(), checkpoint_path)
+    else:
+        torch.save(model.state_dict(), checkpoint_path)
+    print(f'Saved model checkpoint to {checkpoint_path}')

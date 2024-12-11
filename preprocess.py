@@ -60,27 +60,22 @@ def preprocess_graphs(raw_file_names, output_dir, batch_size=16):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     # First pass: calculate cost statistics
     logger.info("Calculating cost statistics...")
-    all_costs = []
-    saved_data = []
-    infoz = []
+    cost_min = float('inf')
+    cost_max = float('-inf')
     for raw_file in tqdm(raw_file_names, desc="Reading costs"):
         with open(raw_file, 'r') as f:
             cost_data = f.read().split('][')
-            saved_data = cost_data
             for i, chunk in tqdm(enumerate(cost_data), desc=f"Processing chunks in {raw_file}", leave=False):
                 indiv_info = '' if i == 0 else '['
                 indiv_info += chunk 
                 indiv_info += ']' if i != len(cost_data) - 1 else ''
-                infoz.append(indiv_info)
                 json_g = json.loads(indiv_info)
-                costs = [graph['cost'] for graph in json_g if graph['cost'] < 2]
-                all_costs.extend(costs)
-    
-    costs = torch.tensor(all_costs, device=device).float()
-    cost_min = costs.min().item()
-    cost_max = costs.max().item()
-    del all_costs, costs
-    
+                for graph in json_g:
+                    if graph['cost'] < 2:
+                        cost_min = min(cost_min, graph['cost'])
+                        cost_max = max(cost_max, graph['cost'])
+    print("cost:", cost_min, cost_max)
+
     processed_count = 0
     current_batch = []
     
@@ -131,16 +126,16 @@ if __name__ == "__main__":
         "testtuning_65.json.graph.json",
         "testtuning_27.json.graph.json",
         "testtuning_36.json.graph.json",
-        # "testtuning_48.json.graph.json",
-        # "testtuning_55.json.graph.json",
-        # "testtuning_60.json.graph.json",
-        # "testtuning_70.json.graph.json",
-        # "finetuning_69.json.graph.json",
-        # "finetuning_35.json.graph.json",
-        # "finetuning_120.json.graph.json",
-        # "0_test_67.json.graph.json",
-        # "0_test_43.json.graph.json",
-        # "0_test_11.json.graph.json"
+        "testtuning_48.json.graph.json",
+        "testtuning_55.json.graph.json",
+        "testtuning_60.json.graph.json",
+        "testtuning_70.json.graph.json",
+        "finetuning_69.json.graph.json",
+        "finetuning_35.json.graph.json",
+        "finetuning_120.json.graph.json",
+        "0_test_67.json.graph.json",
+        "0_test_43.json.graph.json",
+        "0_test_11.json.graph.json"
     ]
     
     # Add full path to raw files
