@@ -76,47 +76,47 @@ def preprocess_graphs(raw_file_names, output_dir, batch_size=16):
                         cost_max = max(cost_max, graph['cost'])
     print("cost:", cost_min, cost_max)
 
-    processed_count = 0
-    current_batch = []
+    # processed_count = 0
+    # current_batch = []
     
-    logger.info("Processing and saving graphs...")
-    for raw_file in tqdm(raw_file_names, desc="Processing files"):
-        with open(raw_file, 'r') as f:
-            f.seek(0)
-            data = f.read().split('][')
-            for i, chunk in tqdm(enumerate(data), desc=f"Processing chunks in {raw_file}", leave=False):
-                info = '' if i == 0 else '['
-                info += chunk
-                info += ']' if i != len(data) - 1 else ''
-                g = json.loads(info)
+    # logger.info("Processing and saving graphs...")
+    # for raw_file in tqdm(raw_file_names, desc="Processing files"):
+    #     with open(raw_file, 'r') as f:
+    #         f.seek(0)
+    #         data = f.read().split('][')
+    #         for i, chunk in tqdm(enumerate(data), desc=f"Processing chunks in {raw_file}", leave=False):
+    #             info = '' if i == 0 else '['
+    #             info += chunk
+    #             info += ']' if i != len(data) - 1 else ''
+    #             g = json.loads(info)
 
-                filtered_graphs = [graph for graph in g if graph['cost'] < 2]
+    #             filtered_graphs = [graph for graph in g if graph['cost'] < 2]
                 
-                for graph in filtered_graphs:
-                    current_batch.append(graph)
+    #             for graph in filtered_graphs:
+    #                 current_batch.append(graph)
                     
-                    if len(current_batch) >= batch_size:
-                        processed_batch = process_batch_graphs(current_batch, cost_min, cost_max)
-                        if processed_batch:
-                            for graph_data in processed_batch:
-                                processed_count += 1
-                                output_file = osp.join(output_dir, f'data_{processed_count}.pt')
-                                graph_data = graph_data.cpu()
-                                torch.save(graph_data, output_file)
-                        current_batch = []
+    #                 if len(current_batch) >= batch_size:
+    #                     processed_batch = process_batch_graphs(current_batch, cost_min, cost_max)
+    #                     if processed_batch:
+    #                         for graph_data in processed_batch:
+    #                             processed_count += 1
+    #                             output_file = osp.join(output_dir, f'data_{processed_count}.pt')
+    #                             graph_data = graph_data.cpu()
+    #                             torch.save(graph_data, output_file)
+    #                     current_batch = []
                         
-                        if processed_count % (batch_size * 10) == 0:
-                            torch.cuda.empty_cache()
+    #                     if processed_count % (batch_size * 10) == 0:
+    #                         torch.cuda.empty_cache()
     
-    # Process remaining graphs
-    if current_batch:
-        processed_batch = process_batch_graphs(current_batch, cost_min, cost_max)
-        if processed_batch:
-            for data in processed_batch:
-                processed_count += 1
-                output_file = osp.join(output_dir, f'data_{processed_count}.pt')
-                data = data.cpu()
-                torch.save(data, output_file)
+    # # Process remaining graphs
+    # if current_batch:
+    #     processed_batch = process_batch_graphs(current_batch, cost_min, cost_max)
+    #     if processed_batch:
+    #         for data in processed_batch:
+    #             processed_count += 1
+    #             output_file = osp.join(output_dir, f'data_{processed_count}.pt')
+    #             data = data.cpu()
+    #             torch.save(data, output_file)
     
     logger.info("Preprocessing completed")
     return processed_count

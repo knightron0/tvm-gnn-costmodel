@@ -13,6 +13,9 @@ from torch_geometric.nn import global_max_pool as gmp
 from torch_geometric.nn import global_mean_pool as gap
 from tqdm import tqdm
 import json
+import time
+from torch import autograd
+
 
 class TVMDataset(Dataset):
     def __init__(self, root, transform=None, pre_transform=None, pre_filter=None):
@@ -39,18 +42,24 @@ class TVMDataset(Dataset):
 
     def get(self, idx):
         data = torch.load(self.processed_paths[idx])
-        # Move to GPU if available
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        return data.to(device)
+        return data
 
 tvm_dataset = TVMDataset(root="/scratch/gilbreth/mangla/gnn_dataset")
+print("Shuffling dataset...")
 tvm_dataset = tvm_dataset.shuffle()
+print("Dataset shuffled.")
 print("len tvm", len(tvm_dataset))
 n = len(tvm_dataset) // 10
 test_dataset = tvm_dataset[:n]
 train_dataset = tvm_dataset[n:]
-test_loader = DataLoader(test_dataset, batch_size=192)
-train_loader = DataLoader(train_dataset, batch_size=192)
+print("Creating test loader...")
+test_loader = DataLoader(test_dataset, batch_size=384, num_workers=96)
+print("Test loader created.")
+print("Creating train loader...")
+train_loader = DataLoader(train_dataset, batch_size=384, num_workers=96)
+print("Train loader created.")
+
+
 class Net(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -88,44 +97,62 @@ class Net(torch.nn.Module):
         return x
 
 
-if torch.cuda.device_count() > 1:
-    print(f"Using {torch.cuda.device_count()} GPUs!")
-    model = torch.nn.DataParallel(Net())
-    device = torch.device('cuda')
-else:
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = Net()
+# if torch.cuda.device_count() > 1:
+#     print(f"Using {torch.cuda.device_count()} GPUs!")
+#     model = torch.nn.DataParallel(Net())
+#     device = torch.device('cuda')
+# else:
+#     print("Using a single GPU or CPU for training.")
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = Net()
 
+print("Moving model to device...")
 model = model.to(device)
+print("Model moved to device.")
+print("Initializing optimizer...")
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+print("Optimizer initialized.")
 
-def train(epoch):
+def train(model, epoch):
     model.train()
 
     loss_all = 0
+    print(f"Starting training epoch {epoch}...")
+    for data in train_loader:
+        print(f"Number of graphs in the batch: {data.num_graphs}")
+        print(f"Size of feature matrix x: {data.x.size()}")
+        print(f"Size of edge index: {data.edge_index.size()}")
+        print(f"Size of batch vector: {data.batch.size()}")
+        break
+
+    
     for data in tqdm(train_loader, desc=f'Training epoch'):
         data = data.to(device)
+        model = model.to(device)
         optimizer.zero_grad()
         output = model(data)
         loss = F.huber_loss(output.squeeze(), data.y)
         loss.backward()
         loss_all += data.num_graphs * loss.item()
         optimizer.step()
+    print(f"Training epoch {epoch} completed.")
     return loss_all / len(train_dataset)
 
 
-def test(loader):
+def test(model, loader):
     model.eval()
 
     total_mse = 0
     total_mae = 0
-    total_r2_num = 0
-    total_r2_den = 0
-    y_mean = torch.mean(torch.cat([data.y for data in loader]))
+    total_y = 0
+    total_y_squared = 0
+    total_count = 0
 
     i = 0
-    for data in loader:
+    print("Starting testing...")
+    for data in tqdm(loader, desc="Testing"):
         data = data.to(device)
+        model.to(device)
         pred = model(data)
         pred = pred.squeeze()
 
@@ -136,16 +163,19 @@ def test(loader):
         mae = F.l1_loss(pred, data.y)
         total_mae += mae.item() * data.num_graphs
         
-        r2_num = torch.sum((pred - data.y) ** 2)
-        r2_den = torch.sum((data.y - y_mean) ** 2)
-        total_r2_num += r2_num.item()
-        total_r2_den += r2_den.item()
+        total_y += torch.sum(data.y)
+        total_y_squared += torch.sum(data.y ** 2)
+        total_count += data.num_graphs
+        
         i += 1
-
+    print("Testing completed.")
     n = len(loader.dataset)
     mse = total_mse / n
     mae = total_mae / n
-    r2 = 1 - (total_r2_num / total_r2_den)
+
+    y_mean = total_y / total_count
+    r2_den = total_y_squared - (total_y ** 2) / total_count
+    r2 = 1 - (total_mse / r2_den)
 
     return {
         'MSE': mse,
@@ -158,15 +188,20 @@ def test(loader):
 save_dir = "/scratch/gilbreth/mangla/gnn_models/model_checkpoints"
 os.makedirs(save_dir, exist_ok=True)
 
-test_acc = test(test_loader)
-print("Original Test Acc", test_acc)
+
+# print("Starting test evaluation...")
+# test_acc = test(test_loader)
+# print("Test evaluation completed.")
+# print("Original Test Acc", test_acc)
 for epoch in range(1, 201):
-    loss = train(epoch)
-    test_acc = test(test_loader)
-    print(f'Epoch: {epoch:03d}, Loss: {loss:.5f}')
-    print(f'Test Acc: {test_acc}')
+    with autograd.detect_anomaly():
+        loss = train(model, epoch)
+        test_acc = test(model, test_loader)
+        print(f'Epoch: {epoch:03d}, Loss: {loss:.5f}')
+        print(f'Test Acc: {test_acc}')
     
-    checkpoint_path = os.path.join(save_dir, f'model_epoch_{epoch}.pt')
+    checkpoint_path = os.path.join(save_dir, f'model_epoch_h100_{epoch}.pt')
+    print(f"Saving model checkpoint for epoch {epoch}...")
     if isinstance(model, torch.nn.DataParallel):
         torch.save(model.module.state_dict(), checkpoint_path)
     else:
