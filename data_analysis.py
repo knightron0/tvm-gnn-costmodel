@@ -70,48 +70,45 @@ def plot_y_distribution(data_dir):
             continue
             
     all_y_values = np.array(all_y_values)
+
+    np.save('y_values.npy', all_y_values)
+    print("Y values saved to 'y_values.npy'")
     
-    # Create figure with multiple subplots
-    fig = plt.figure(figsize=(15, 15))
-    gs = plt.GridSpec(3, 2)
+    # fig = plt.figure(figsize=(15, 15))
+    # gs = plt.GridSpec(3, 2)
     
-    # Histogram with KDE
-    ax1 = fig.add_subplot(gs[0, :])
-    sns.histplot(data=all_y_values, kde=True, ax=ax1)
-    ax1.set_title('Distribution of Target Values (y)')
-    ax1.set_xlabel('Target Value')
-    ax1.set_ylabel('Count')
+    # ax1 = fig.add_subplot(gs[0, :])
+    # sns.histplot(data=all_y_values, kde=True, ax=ax1)
+    # ax1.set_title('Distribution of Target Values (y)')
+    # ax1.set_xlabel('Target Value')
+    # ax1.set_ylabel('Count')
     
-    # Box plot
-    ax2 = fig.add_subplot(gs[1, 0])
-    sns.boxplot(data=all_y_values, ax=ax2)
-    ax2.set_title('Box Plot of Target Values (y)')
-    ax2.set_xlabel('Target Value')
+    # ax2 = fig.add_subplot(gs[1, 0])
+    # sns.boxplot(data=all_y_values, ax=ax2)
+    # ax2.set_title('Box Plot of Target Values (y)')
+    # ax2.set_xlabel('Target Value')
     
-    # Scatter plot
-    ax3 = fig.add_subplot(gs[1, 1])
-    ax3.scatter(indices[:10000], all_y_values[:10000], alpha=0.5, s=1)
-    ax3.set_title('Scatter Plot of First 10000 Target Values')
-    ax3.set_xlabel('Sample Index')
-    ax3.set_ylabel('Target Value')
+    # ax3 = fig.add_subplot(gs[1, 1])
+    # ax3.scatter(indices[:10000], all_y_values[:10000], alpha=0.5, s=1)
+    # ax3.set_title('Scatter Plot of First 10000 Target Values')
+    # ax3.set_xlabel('Sample Index')
+    # ax3.set_ylabel('Target Value')
     
-    # Q-Q plot
-    ax4 = fig.add_subplot(gs[2, :])
-    stats.probplot(all_y_values, dist="norm", plot=ax4)
-    ax4.set_title("Q-Q Plot of Target Values")
+    # ax4 = fig.add_subplot(gs[2, :])
+    # stats.probplot(all_y_values, dist="norm", plot=ax4)
+    # ax4.set_title("Q-Q Plot of Target Values")
     
-    plt.tight_layout()
-    plt.savefig('y_distribution_analysis.png', dpi=300, bbox_inches='tight')
-    plt.close()
+    # plt.tight_layout()
+    # plt.savefig('y_distribution_analysis.png', dpi=300, bbox_inches='tight')
+    # plt.close()
     
-    print("\nPlot has been saved as 'y_distribution_analysis.png'")
+    # print("\nPlot has been saved as 'y_distribution_analysis.png'")
     
-    # Additional violin plot
-    plt.figure(figsize=(10, 6))
-    sns.violinplot(data=all_y_values)
-    plt.title('Violin Plot of Target Values (y)')
-    plt.savefig('y_violin_plot.png', dpi=300, bbox_inches='tight')
-    plt.close()
+    # plt.figure(figsize=(10, 6))
+    # sns.violinplot(data=all_y_values)
+    # plt.title('Violin Plot of Target Values (y)')
+    # plt.savefig('y_violin_plot.png', dpi=300, bbox_inches='tight')
+    # plt.close()
     
     print("Additional violin plot saved as 'y_violin_plot.png'")
 
@@ -119,4 +116,4 @@ def plot_y_distribution(data_dir):
 
 if __name__ == "__main__":
     data_dir = "/scratch/gilbreth/mangla/gnn_dataset/processed"
-    calculate_statistics(data_dir)
+    plot_y_distribution(data_dir)

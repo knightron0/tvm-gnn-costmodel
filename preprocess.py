@@ -8,6 +8,7 @@ from gensim.models import fasttext
 from pathlib import Path
 import logging
 import os
+from concurrent.futures import ProcessPoolExecutor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,23 +57,18 @@ def process_batch_graphs(batch_graphs):
         logger.error(f"Error processing batch: {e}")
         return None
 
-def preprocess_graphs(raw_file_names, output_dir, batch_size=16):
+def preprocess_graphs(raw_file_names, output_dir, batch_size=384, num_workers=8):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    # First pass: calculate cost statistics
     logger.info("Calculating cost statistics...")
     processed_count = 0
     current_batch = []
+    metadata_file = "/scratch/gilbreth/mangla/bigdataset_metadata.txt"
     
     logger.info("Processing and saving graphs...")
     for raw_file in tqdm(raw_file_names, desc="Processing files"):
-        metadata_path = f'/scratch/gilbreth/mangla/metadata_gnn/{raw_file.split("/")[-1].replace(".json.graph", "")}'
-        metadata = json.load(open(metadata_path, 'r'))
-        print(raw_file, len(metadata))
         with open(raw_file, 'r') as f:
             f.seek(0)
             data = f.readlines()
-            print(len(data))
-            exit()
             for i, chunk in tqdm(enumerate(data), desc=f"Processing chunks in {raw_file}", leave=False):
                 graph = json.loads(chunk)
                 if graph['cost'] < 2:
@@ -81,27 +77,41 @@ def preprocess_graphs(raw_file_names, output_dir, batch_size=16):
                     continue
                 
                 if len(current_batch) >= batch_size:
-                    processed_batch = process_batch_graphs(current_batch)
-                    if processed_batch:
-                        for graph_data in processed_batch:
-                            processed_count += 1
-                            output_file = osp.join(output_dir, f'data_{processed_count}.pt')
-                            graph_data = graph_data.cpu()
-                            torch.save(graph_data, output_file)
+                    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                        processed_batch = process_batch_graphs(current_batch)
+                        if processed_batch:
+                            idx = 0
+                            metadata_entries = []
+                            for graph_data in processed_batch:
+                                processed_count += 1
+                                output_file = osp.join(output_dir, f'data_{processed_count}.pt')
+                                metadata_entries.append(f"{output_file},{current_batch[idx]['workload']}\n")
+                                torch.save(graph_data, output_file)
+                                idx += 1
+                                
+                            with open(metadata_file, 'a') as mf:
+                                mf.writelines(metadata_entries)
+                                
                     current_batch = []
                     
-                    if processed_count % (batch_size * 10) == 0:
+                    if processed_count % (batch_size * 50) == 0:
                         torch.cuda.empty_cache()
 
-    # Process remaining graphs
     if current_batch:
-        processed_batch = process_batch_graphs(current_batch)
-        if processed_batch:
-            for data in processed_batch:
-                processed_count += 1
-                output_file = osp.join(output_dir, f'data_{processed_count}.pt')
-                data = data.cpu()
-                torch.save(data, output_file)
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            processed_batch = process_batch_graphs(current_batch)
+            if processed_batch:
+                metadata_entries = []
+                idx = 0
+                for data in processed_batch:
+                    processed_count += 1
+                    output_file = osp.join(output_dir, f'data_{processed_count}.pt')
+                    metadata_entries.append(f"{output_file},{current_batch[idx]['workload']}\n")
+                    torch.save(data, output_file)
+                    idx += 1
+                
+                with open(metadata_file, 'a') as mf:
+                    mf.writelines(metadata_entries)
     
     logger.info("Preprocessing completed")
     return processed_count
@@ -114,5 +124,5 @@ if __name__ == "__main__":
     
     output_dir = "/scratch/gilbreth/mangla/bigdataset" 
     
-    num_processed = preprocess_graphs(raw_files, output_dir, batch_size=32)
+    num_processed = preprocess_graphs(raw_files, output_dir, batch_size=1024, num_workers=8)
     print(f"Successfully processed {num_processed} graphs")
