@@ -32,7 +32,7 @@ def process_file(filepath):
         return f"Error processing {filepath}: {str(e)}\n{traceback.format_exc()}"
 
 def main():
-    data_dir = "/scratch/gilbreth/mangla/newdataset/val"
+    data_dir = "/scratch/gilbreth/mangla/newdataset/test"
     
     pt_files = [
         os.path.join(data_dir, f) 
@@ -125,3 +125,5 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     data_dir = "/scratch/gilbreth/mangla/gnn_dataset/processed"
 #     calculate_statistics(data_dir)
+
+
