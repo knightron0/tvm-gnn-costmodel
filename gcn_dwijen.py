@@ -85,11 +85,11 @@ def main():
     print("len val", len(val_dataset))
 
     print("Creating val loader...")
-    val_loader = DataLoader(val_dataset, batch_size=32, num_workers=32, persistent_workers=True)
+    val_loader = DataLoader(val_dataset, batch_size=40, num_workers=32, persistent_workers=True)
     print("Test loader created.")
 
     print("Creating train loader...")
-    train_loader = DataLoader(train_dataset, batch_size=32, num_workers=32, persistent_workers=True)
+    train_loader = DataLoader(train_dataset, batch_size=40, num_workers=32, persistent_workers=True)
     print("Train loader created.")
 
 
@@ -104,7 +104,7 @@ def main():
     model = model.to(device)
     print("Model moved to device.")
     print("Initializing optimizer...")
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-6)
     print("Optimizer initialized.")
 
     def train(model, epoch):

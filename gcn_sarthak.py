@@ -124,12 +124,16 @@ def main():
             data = data.to(device)
             model = model.to(device)
             optimizer.zero_grad()
+
             output = model(data)
+
             loss = F.huber_loss(output.squeeze(), data.y)
-            # print(loss, data.num_graphs, loss_all)
+
             loss.backward()
-            loss_all += data.num_graphs * loss.item()
+            
+            loss_all += loss.item()
             optimizer.step()
+
         print(f"Training epoch {epoch} completed.")
         return loss_all / len(train_dataset)
 
@@ -157,11 +161,11 @@ def main():
             huber = F.huber_loss(pred, data.y)
             # print(data.y, pred)
 
-            total_mse += mse.item() * data.num_graphs
-            total_huber += huber.item() * data.num_graphs
+            total_mse += mse.item()
+            total_huber += huber.item()
             
             mae = F.l1_loss(pred, data.y)
-            total_mae += mae.item() * data.num_graphs
+            total_mae += mae.item()
             
             total_y += torch.sum(data.y)
             total_y_squared += torch.sum(data.y ** 2)
