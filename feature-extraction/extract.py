@@ -227,7 +227,6 @@ def process_all_networks(target_str="llvm -mcpu=core-avx2", batch_size=1, dtype=
             network_name, batch_size, layout, dtype
         )
         
-        # Extract tasks
         tasks, task_weights = auto_scheduler.extract_tasks(mod["main"], params, target)
         
         network_graphs = []
@@ -300,11 +299,9 @@ def build_graph(task, state):
     return graph
 
 if __name__ == "__main__":
-    # Process all networks and generate graphs
     print("Starting network processing...")
     all_graphs = process_all_networks()
     
-    # Print summary
     print("\n=== Processing Graphs ===")
     for network_name, network_graphs in all_graphs.items():
         print(f"\n{network_name}:")
