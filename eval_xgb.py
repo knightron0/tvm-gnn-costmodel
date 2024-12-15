@@ -1,22 +1,3 @@
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-
-"""Test cost models"""
-
 import tempfile
 
 import numpy as np
@@ -34,6 +15,8 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm  # Add tqdm import
 import json
+import torch
+import torch.nn.functional as F
 
 NETWORK_INFO_FOLDER = None
 TO_MEASURE_PROGRAM_FOLDER = None
@@ -97,27 +80,29 @@ def train_xgb_model(filename):
     model.save('xgb.model')
 
 
-def load_dataset(args, train_workloads):
+def load_dataset(args, test_workloads):
     try:
         inputs, res = auto_scheduler.RecordReader(args).read_lines()
     except Exception as e:
         print(f"Could not read file {args}, error: {e}")
         exit()
-    train_inputs = [] 
-    train_res = []
+    test_inputs = [] 
+    test_res = []
+    # print(type(inputs[0]), type(res[0]))
+    # exit()
     assert(len(inputs) == len(res))
     for i in range(len(inputs)):
         hash_str = inputs[i].task.workload_key.split('"')[1].split('"')[0]
-        if hash_str not in train_workloads:
+        if hash_str not in test_workloads:
             continue
-        train_inputs.append(inputs[i])
-        train_res.append(res[i])
-    return train_inputs, train_res
+        test_inputs.append(inputs[i])
+        test_res.append(res[i])
+    return test_inputs, test_res
 
 if __name__ == "__main__":
     import argparse
-    train_workloads = open('train_workloads.txt', 'r').readlines()
-    train_workloads = [x.strip() for x in train_workloads]
+    test_workloads = open('test_workloads.txt', 'r').readlines()
+    test_workloads = [x.strip() for x in test_workloads]
 
     directory_path = "/scratch/gilbreth/mangla/tlm_dataset/gen/gen_data/measure_data_v100/"
 
@@ -127,22 +112,34 @@ if __name__ == "__main__":
     tasks = load_and_register_tasks()
 
     files = os.listdir(directory_path)
+    model = auto_scheduler.XGBModel(verbose_eval=1000, num_warmup_sample=-1, model_file='xgb.model')
+    model.load("/scratch/gilbreth/mangla/xgb-bestmodel.model")
+    print('Loaded Model')
+
     name = None
     for i, filename in enumerate(files):
         if "graph" in filename:
             continue
-        inputs, results = load_dataset(directory_path + filename, train_workloads)
+        inputs, results = load_dataset(directory_path + filename, test_workloads)
         if len(inputs) == 0:
-            print("Nothing found in", filename)
-            continue
+          continue
 
-        print("Updating XGBoost with", filename, len(inputs))
+        
+        # # for inp in inputs:
+        # #   # score = model.predict(inp.task, [inp.state])
+        # #   print(inp.task)
+        # #   print(inp.state)
+        # #   print(score)
+        # #   print(results[0])
+        # #   break
+        # # break
+        # # scores = model.predict([x.task for x in inputs], [x.state for x in inputs])
 
-        model = auto_scheduler.XGBModel(verbose_eval=1000, num_warmup_sample=-1, model_file='xgb.model')
-        if name:
-            model.load(name)
-        model.update(inputs, results)
-        
-        name = '/scratch/gilbreth/mangla/xgb-models-new/xgboost_' + filename + str(i) + '.model'
-        model.save(name)
-        
+        # actual_values = torch.tensor([result.cost for result in results], dtype=torch.float32)
+        # predicted_values = torch.tensor(scores, dtype=torch.float32)
+        # print(actual_values.shape, predicted_values.shape)
+
+        # huber_loss = F.huber_loss(predicted_values, actual_values)
+
+        # print(f"Huber Loss for {filename}: {huber_loss.item()}")
+        # break
