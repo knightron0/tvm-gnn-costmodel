@@ -18,6 +18,7 @@ import json
 import torch
 import torch.nn.functional as F
 import sys
+import threading
 
 NETWORK_INFO_FOLDER = None
 TO_MEASURE_PROGRAM_FOLDER = None
@@ -146,28 +147,39 @@ if __name__ == "__main__":
     total_tests = 0 
     total_huber = 0
     inf = 10**38
+    threads = []
+    lock = threading.Lock()
     for key in tests:
-        print(key)
-        print(len(tests[key]), len(res[key]))
-        scores = model.predict(task_map[key], tests[key])
-        actual_values = []
-        predicted_values = []
-        for i in range(len(scores)):
-            if scores[i] == float("-inf") or scores[i] <= -inf:
-                continue
-            predicted_values.append(scores[i])
-            actual_values.append(res[key][i])
-        actual_values = torch.tensor(actual_values, dtype=torch.float32)
-        predicted_values = torch.tensor(predicted_values, dtype=torch.float32)
-        print(actual_values)
-        print(predicted_values)
+        def predict_one():
+            print(key)
+            print(len(tests[key]), len(res[key]))
+            with lock:
+                scores = model.predict(task_map[key], tests[key])
+            actual_values = []
+            predicted_values = []
+            for i in range(len(scores)):
+                if scores[i] == float("-inf") or scores[i] <= -inf:
+                    continue
+                predicted_values.append(scores[i])
+                actual_values.append(res[key][i])
+            actual_values = torch.tensor(actual_values, dtype=torch.float32)
+            predicted_values = torch.tensor(predicted_values, dtype=torch.float32)
+            print(actual_values)
+            print(predicted_values)
 
-        huber_loss = F.huber_loss(predicted_values, actual_values)
+            huber_loss = F.huber_loss(predicted_values, actual_values)
+            
+            with lock:
+                f = open('xgb_results.txt', 'r')
+                f.write(f"Huber Loss for workload {key}: {huber_loss.item()}\n\n")
+                f.close()
+                total_huber += huber_loss * len(scores)
+                total_tests += len(scores)
+        threads.append(threading.Thread(target=predict_one))
+        threads[-1].start()
 
-        print(f"Huber Loss for workload {key}: {huber_loss.item()}")
-        
-        total_huber += huber_loss * len(scores)
-        total_tests += len(scores)
-    
+    for thr in threads:
+        thr.join() 
     total_huber /= total_tests
-    print(f"Huber Loss over all Test Sets: {total_huber}")
+    f = open('xgb_results.txt', 'r')
+    f.write(f"Huber Loss over all Test Sets: {total_huber}\n\n")

@@ -19,3 +19,6 @@ Converting the original TLM dataset's `<MeasureInput, MeasureOutput>` samples to
 
 ### Evals
 Contains direct evaluation scripts on the test dataset. `train_xgboost.py` extracts features from workloads included in the training dataset and uses them to train an XGBoost model. `eval_xgb.py` and `eval_gcn.py` run the corresponding models through the test set. 
+
+### Infra
+Contains the RPC server launcher for multi-gpu measurement during autoscheduling, and the slurm batch script to preprocess the dataset.
